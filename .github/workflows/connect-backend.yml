@@ -1,0 +1,35 @@
+name: Connect DENTIMERI backend
+on:
+  push:
+    paths: ['.github/workflows/connect-backend.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Connect public and staff pages
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          url='https://script.google.com/macros/s/AKfycbzc_8B3dZf4xTlLL0fRX5Rbk1wy2A8TpmmlIevlLfbZqYSMkxtdoK369EPHCkjxeAhw/exec'
+          for fn in ['index.html','staff.html']:
+              p=Path(fn)
+              s=p.read_text(encoding='utf-8')
+              import re
+              s=re.sub(r"const WEB_APP_URL\s*=\s*'[^']*';", "const WEB_APP_URL = '"+url+"';", s)
+              p.write_text(s,encoding='utf-8')
+          for fn in ['index.html','staff.html']:
+              s=Path(fn).read_text(encoding='utf-8')
+              assert url in s, fn+' backend URL missing'
+              assert 'ВСТАВЬ_СЮДА_ADRES_APPS_SCRIPT' not in s, fn+' placeholder remains'
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add index.html staff.html
+          git diff --cached --quiet || git commit -m 'Connect DENTIMERI Sheets Calendar backend'
+          git push
