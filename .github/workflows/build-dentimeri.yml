@@ -1,0 +1,114 @@
+name: Build DENTIMERI from template
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-dentimeri.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone fixed dental template and replace client variables
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from urllib.request import urlopen
+          import re
+
+          base = 'https://raw.githubusercontent.com/xugushik-source/A1-Dent-/main/'
+          files = ['index.html', 'about.html', 'staff.html', 'tips.html', 'Code.gs']
+
+          for name in files:
+              Path(name).write_bytes(urlopen(base + name).read())
+
+          html_files = ['index.html', 'about.html', 'staff.html', 'tips.html']
+
+          replacements = {
+              'A1': 'DENTIMERI',
+              '+995322800101': '+995598571818',
+              '995322800101': '995598571818',
+              '+995 32 280 01 01': '+995 598 57 18 18',
+              'ზაქარია ფალიაშვილის ქ. 15, თბილისი': 'პუშკინის ქ. 20, ქუთაისი',
+              '15 Zakaria Paliashvili St, Tbilisi': '20 Pushkin St, Kutaisi',
+              'ул. Закария Палиашвили, 15, Тбилиси': 'ул. Пушкина, 20, Кутаиси',
+              'თბილისი, ვაკე': 'ქუთაისი',
+              'Tbilisi, Vake': 'Kutaisi',
+              'Тбилиси, Ваке': 'Кутаиси',
+              'სტომატოლოგია გლდანში, თბილისში': 'სტომატოლოგია ქუთაისში',
+              'თანამედროვე სტომატოლოგია თბილისის ცენტრში': 'თანამედროვე სტომატოლოგია ქუთაისში',
+              'Dentistry in Vake, Tbilisi': 'Dentistry in Kutaisi',
+              'modern dentistry in central Tbilisi': 'modern dentistry in Kutaisi',
+              'Стоматология в Ваке, Тбилиси': 'Стоматология в Кутаиси',
+              'современная стоматология в центре Тбилиси': 'современная стоматология в Кутаиси',
+          }
+
+          for name in html_files:
+              p = Path(name)
+              s = p.read_text(encoding='utf-8')
+              for old, new in replacements.items():
+                  s = s.replace(old, new)
+
+              # DENTIMERI has no confirmed logo file yet: keep the standard text brand.
+              s = re.sub(r'\s*<img\s+src="a1-logo\.svg"[^>]*>\s*', '\n    ', s, flags=re.I)
+
+              # Never carry A1 patient/clinic photos into another client's site.
+              s = re.sub(r'\s*<div class="photo">\s*<img[^>]*>\s*</div>\s*', '\n', s, flags=re.I|re.S)
+              s = re.sub(r'\s*<div class="photo-grid">.*?</div>\s*</div>\s*', '\n', s, flags=re.I|re.S)
+              s = re.sub(r'<img[^>]+dentists10\.com[^>]*>', '', s, flags=re.I)
+
+              # New clinic backend must never point to A1 Apps Script.
+              s = re.sub(r"const WEB_APP_URL\s*=\s*'[^']*';", "const WEB_APP_URL = 'ВСТАВЬ_СЮДА_ADRES_APPS_SCRIPT';", s)
+
+              # Route to the confirmed street address area in Kutaisi.
+              if name == 'index.html':
+                  s = re.sub(
+                      r'(<a class="route-link" href=")[^"]+(" target="_blank")',
+                      r'\1https://www.google.com/maps/dir/?api=1&amp;origin=My+Location&amp;destination=42.26907%2C42.70437&amp;travelmode=driving\2',
+                      s,
+                      count=1
+                  )
+
+              # Hours are not confirmed yet. Do not inherit A1's schedule as a fact.
+              s = s.replace('ორშაბათი–შაბათი, 10:00–20:00', 'დაზუსტდება')
+              s = s.replace('Mon–Sat, 10:00–20:00', 'To be confirmed')
+              s = s.replace('пн–сб, 9:00–19:00', 'уточняется')
+              s = s.replace('пн–сб, 10:00–20:00', 'уточняется')
+
+              p.write_text(s, encoding='utf-8')
+
+          # Keep backend logic identical, only brand changes. IDs remain explicit placeholders.
+          p = Path('Code.gs')
+          s = p.read_text(encoding='utf-8').replace('A1', 'DENTIMERI')
+          p.write_text(s, encoding='utf-8')
+
+          Path('README.md').write_text(
+              '# DENTIMERI\n\nDental clinic website cloned from the fixed Order & Profit dental template.\n'
+              'Current temporary WhatsApp/phone: +995 598 57 18 18.\n'
+              'Address: Pushkin St 20, Kutaisi. Prices/services remain template placeholders until the clinic confirms them.\n',
+              encoding='utf-8'
+          )
+
+          # Safety checks from the fixed cloning process.
+          combined = '\n'.join(Path(f).read_text(encoding='utf-8') for f in html_files)
+          forbidden = ['a1-logo.svg', '+995322800101', '995322800101', '15 Zakaria Paliashvili', 'Закария Палиашвили']
+          bad = [x for x in forbidden if x in combined]
+          if bad:
+              raise SystemExit('Old client data still present: ' + ', '.join(bad))
+          if 'script.google.com/macros/s/AKfy' in combined:
+              raise SystemExit('Foreign Apps Script URL still present')
+          PY
+
+      - name: Commit generated client site
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html about.html staff.html tips.html Code.gs README.md
+          git diff --cached --quiet || git commit -m 'Build DENTIMERI site from fixed template'
+          git push
